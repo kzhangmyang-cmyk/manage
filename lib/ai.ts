@@ -3,7 +3,7 @@ import type { AIAnalysisResult } from './types'
 
 const ANALYZE_PROMPT = `你是一个企业内部问题分析助手。
 用户会提交一条自然语言的内部问题描述。
-请分析并以JSON格式返回：
+请分析并以JSON格式返回，只返回JSON不要其他内容：
 {
   "category": "问题类型（IT/设备/HR/采购/客诉/其他）",
   "priority": "优先级（高/中/低）",
@@ -14,7 +14,22 @@ const ANALYZE_PROMPT = `你是一个企业内部问题分析助手。
   "auto_handle": true,
   "recommended_path": "自动完成/建议确认/升级人工"
 }
-只返回JSON，不要其他内容。`
+
+判断recommended_path必须严格按照以下规则：
+以下情况必须返回"自动完成"，auto_handle返回true：
+- 问题包含"查"、"查询"、"多少"、"是谁"、"哪个"等信息查询意图
+- 问题是询问库存、排班、进度、状态、人员安排
+- 问题是询问公司制度、流程说明、FAQ
+- 问题是请求发送通知或提醒
+
+以下情况返回"建议确认"，auto_handle返回false：
+- 问题需要审批但属于常规流程
+- 问题需要人判断但可以给建议
+
+以下情况返回"升级人工"，auto_handle返回false：
+- 问题涉及高风险决策
+- 问题影响范围大
+- 问题信息不足无法判断`
 
 type AIProvider = 'openai' | 'minimax' | 'openai-compatible' | 'anthropic'
 

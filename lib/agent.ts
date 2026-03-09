@@ -108,7 +108,11 @@ const OPENAI_TOOLS = TOOL_DEFINITIONS.map((tool) => ({
   function: {
     name: tool.name,
     description: tool.description,
-    parameters: tool.input_schema,
+    parameters: {
+      type: 'object',
+      properties: tool.input_schema.properties,
+      required: tool.input_schema.required,
+    },
   },
 }))
 
@@ -199,7 +203,7 @@ export async function runAgent(
 
       for (const toolCall of toolCalls) {
         const toolInput = parseToolArguments(toolCall.function.arguments)
-        const execution = await executeTool(issueId, toolCall.function.name, toolInput)
+        const execution = await executeTool(issueId, toolCall.function.name, toolInput, issueText)
 
         results.push({
           id: randomUUID(),
@@ -239,7 +243,12 @@ export function getExecutionLogs(issueId: string) {
   return listExecutionLogs(issueId)
 }
 
-async function executeTool(issueId: string, name: AgentToolName, input: Record<string, unknown>) {
+async function executeTool(
+  issueId: string,
+  name: AgentToolName,
+  input: Record<string, unknown>,
+  originalQuestion: string,
+) {
   const beforeLogId = logBeforeTool(issueId, name, input)
 
   try {
@@ -250,7 +259,7 @@ async function executeTool(issueId: string, name: AgentToolName, input: Record<s
         return { ok: true as const, output }
       }
       case 'query_data': {
-        const output = runQueryData(input)
+        const output = await runQueryData(input, originalQuestion)
         logAfterTool(issueId, beforeLogId, name, '企业内部数据查询完成。', output, 'completed', false, false)
         return { ok: true as const, output }
       }
@@ -291,20 +300,43 @@ function runSendNotification(issueId: string, input: Record<string, unknown>) {
   }
 }
 
-function runQueryData(input: Record<string, unknown>) {
+async function runQueryData(input: Record<string, unknown>, originalQuestion: string) {
   const queryType = readQueryType(input.query_type)
   const keyword = readString(input, 'keyword')
   const matches = queryMockData(queryType, keyword)
 
+  if (matches.length > 0) {
+    return { found: true, query_type: queryType, keyword, items: matches }
+  }
+
+  const apiKey = readMiniMaxApiKey()
+  const client = new OpenAI({
+    apiKey,
+    baseURL: 'https://api.minimax.io/v1',
+  })
+
+  const fallback = await client.chat.completions.create({
+    model: process.env.MINIMAX_AGENT_MODEL?.trim() || MINIMAX_AGENT_MODEL,
+    messages: [
+      {
+        role: 'user',
+        content: `员工询问：${originalQuestion}\n查询关键词：${keyword}\n\n内部数据库无记录，请根据企业管理常识给出简洁建议，不超过60字，不要编造具体数据。`,
+      },
+    ],
+    extra_body: { reasoning_split: true },
+  } as never)
+
   return {
+    found: false,
+    fallback: true,
     query_type: queryType,
     keyword,
-    count: matches.length,
-    items: matches.map((item) => ({
-      id: item.id,
-      keyword: item.keyword,
-      result: item.result,
-    })),
+    suggestion:
+      typeof fallback.choices?.[0]?.message?.content === 'string' &&
+      fallback.choices[0].message.content.trim()
+        ? fallback.choices[0].message.content.trim()
+        : '建议联系相关负责人确认。',
+    note: '内部数据库无记录，以下为AI推理建议',
   }
 }
 
@@ -345,7 +377,7 @@ function runEscalateIssue(issueId: string, input: Record<string, unknown>) {
 async function callMiniMax(messages: OpenAIStyleMessage[], apiKey: string): Promise<OpenAIStyleResponse> {
   const client = new OpenAI({
     apiKey,
-    baseURL: 'https://api.minimax.io/v1',
+    baseURL: 'https://api.minimax.chat/v1',
   })
 
   return (await client.chat.completions.create({
@@ -353,7 +385,7 @@ async function callMiniMax(messages: OpenAIStyleMessage[], apiKey: string): Prom
     temperature: 0,
     max_tokens: 1024,
     tool_choice: 'auto',
-    tools: OPENAI_TOOLS as never,
+    tools: OPENAI_TOOLS,
     messages: messages as never,
     extra_body: {
       reasoning_split: true,

@@ -51,79 +51,55 @@ function getDotStyle(status: 'completed' | 'running' | 'failed', tone?: 'warning
 export function AgentActivityPanel({ status, issueId, recommendedPath }: AgentActivityPanelProps) {
   const [logs, setLogs] = useState<DbExecutionLogEntry[]>([])
   const [pollError, setPollError] = useState<string | null>(null)
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const closedByDoneRef = useRef(false)
 
   useEffect(() => {
     setLogs([])
     setPollError(null)
-
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current)
-      intervalRef.current = null
-    }
+    closedByDoneRef.current = false
 
     if (!issueId) {
       return
     }
 
-    let cancelled = false
+    const es = new EventSource(`/api/issues/${issueId}/stream`)
 
-    async function fetchLogs() {
+    es.onmessage = (event) => {
       try {
-        const response = await fetch(`/api/issues/${issueId}/logs`, {
-          cache: 'no-store',
-        })
+        const data = JSON.parse(event.data) as unknown
 
-        if (!response.ok) {
-          const payload = (await response.json().catch(() => null)) as { error?: string } | null
-          throw new Error(payload?.error ?? '读取执行日志失败。')
-        }
-
-        const payload = (await response.json()) as {
-          issueId: string
-          logs: DbExecutionLogEntry[]
-        }
-
-        if (cancelled) {
+        if (isStreamControlMessage(data, 'done')) {
+          closedByDoneRef.current = true
+          es.close()
           return
         }
 
-        const nextLogs = Array.isArray(payload.logs) ? payload.logs : []
-        setLogs(nextLogs)
+        if (isStreamControlMessage(data, 'ready')) {
+          return
+        }
 
-        if (shouldStopPolling(nextLogs, recommendedPath)) {
-          if (intervalRef.current) {
-            clearInterval(intervalRef.current)
-            intervalRef.current = null
-          }
+        if (isExecutionLog(data)) {
+          setLogs((previous) =>
+            previous.some((item) => item.id === data.id) ? previous : [...previous, data],
+          )
         }
       } catch (error) {
-        if (cancelled) {
-          return
-        }
-
-        setPollError(error instanceof Error ? error.message : '读取执行日志失败。')
-
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current)
-          intervalRef.current = null
-        }
+        setPollError(error instanceof Error ? error.message : '解析执行日志事件失败。')
       }
     }
 
-    void fetchLogs()
-    intervalRef.current = setInterval(() => {
-      void fetchLogs()
-    }, 2000)
+    es.onerror = () => {
+      if (!closedByDoneRef.current) {
+        setPollError('Agent 实时日志连接中断。')
+      }
+
+      es.close()
+    }
 
     return () => {
-      cancelled = true
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current)
-        intervalRef.current = null
-      }
+      es.close()
     }
-  }, [issueId, recommendedPath])
+  }, [issueId])
 
   const displayItems = useMemo(() => buildDisplayItems(logs, recommendedPath), [logs, recommendedPath])
 
@@ -386,26 +362,29 @@ function summarizeLogDetail(log: DbExecutionLogEntry) {
   return undefined
 }
 
-function shouldStopPolling(
-  logs: DbExecutionLogEntry[],
-  recommendedPath?: AIAnalysisResult['recommended_path'] | null,
-) {
-  if (logs.length === 0) {
+function isExecutionLog(value: unknown): value is DbExecutionLogEntry {
+  if (!value || typeof value !== 'object') {
     return false
   }
 
-  const terminalStatuses = new Set(['completed', 'failed'])
-  const allTerminal = logs.every((log) => terminalStatuses.has(log.status))
+  const record = value as Record<string, unknown>
 
-  if (!allTerminal) {
-    return false
-  }
+  return (
+    typeof record.id === 'string' &&
+    typeof record.issueId === 'string' &&
+    typeof record.timestamp === 'string' &&
+    typeof record.action === 'string' &&
+    typeof record.result === 'string'
+  )
+}
 
-  if (recommendedPath === '自动完成') {
-    return logs.some((log) => log.action === 'Agent执行完成')
-  }
-
-  return true
+function isStreamControlMessage(value: unknown, type: 'ready' | 'done') {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    typeof (value as { type?: unknown }).type === 'string' &&
+    (value as { type: string }).type === type
+  )
 }
 
 function parseDetails(value?: string) {

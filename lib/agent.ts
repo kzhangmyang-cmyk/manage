@@ -1,6 +1,6 @@
 import 'server-only'
 
-import Anthropic from '@anthropic-ai/sdk'
+import OpenAI from 'openai'
 import { randomUUID } from 'node:crypto'
 import {
   insertExecutionLog,
@@ -22,25 +22,31 @@ import type {
   QueryDataType,
 } from './types'
 
-const CLAUDE_MODEL = 'claude-sonnet-4-20250514'
+const MINIMAX_AGENT_MODEL = 'MiniMax-M2.5'
 const MAX_AGENT_TURNS = 6
 type AgentProvider = 'anthropic' | 'openai' | 'minimax' | 'openai-compatible'
 
-type ClaudeMessage = {
-  role: 'user' | 'assistant'
-  content: Array<Record<string, unknown>> | string
-}
+type OpenAIStyleMessage = Record<string, unknown>
 
-type ClaudeResponse = {
+type OpenAIStyleToolCall = {
   id: string
-  stop_reason: string | null
-  content: Array<
-    | { type: 'text'; text: string }
-    | { type: 'tool_use'; id: string; name: AgentToolName; input: Record<string, unknown> }
-  >
+  type: 'function'
+  function: {
+    name: AgentToolName
+    arguments: string
+  }
 }
 
-const TOOLS = [
+type OpenAIStyleResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string | null
+      tool_calls?: OpenAIStyleToolCall[]
+    }
+  }>
+}
+
+const TOOL_DEFINITIONS = [
   {
     name: 'send_notification',
     description: '发送通知给指定人员',
@@ -97,6 +103,15 @@ const TOOLS = [
   },
 ] as const
 
+const OPENAI_TOOLS = TOOL_DEFINITIONS.map((tool) => ({
+  type: 'function',
+  function: {
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.input_schema,
+  },
+}))
+
 export async function runAgent(
   issueText: string,
   analysisResult: AIAnalysisResult,
@@ -126,104 +141,87 @@ export async function runAgent(
   try {
     const provider = resolveAgentProvider()
 
-    if (provider !== 'anthropic') {
-      const message = `当前 AGENT_PROVIDER=${provider}，但 runAgent 目前只实现了 anthropic Tool Use 路径。`
-      logError(issueId, 'agent', 'Agent 配置缺失', message)
+    if (provider !== 'minimax') {
+      const message = `当前 AGENT_PROVIDER=${provider}，但 runAgent 目前只实现了 minimax Tool Use 路径。`
+      logError(issueId, 'agent', 'Agent 配置不匹配', message)
       updateIssueStatus(issueId, '执行失败')
       results.push(buildErrorResult(issueId, 'agent_error', message))
       return results
     }
 
-    const apiKey = readAnthropicApiKey()
-
-    const messages: ClaudeMessage[] = [
+    const apiKey = readMiniMaxApiKey()
+    const messages: OpenAIStyleMessage[] = [
+      {
+        role: 'system',
+        content: buildSystemPrompt(),
+      },
       {
         role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: buildInitialUserPrompt(issueId, issueText, analysisResult),
-          },
-        ],
+        content: buildInitialUserPrompt(issueId, issueText, analysisResult),
       },
     ]
 
     for (let turn = 0; turn < MAX_AGENT_TURNS; turn += 1) {
-      const response = await callClaude(messages, apiKey)
-      const textBlocks = response.content.filter((block) => block.type === 'text') as Array<{
-        type: 'text'
-        text: string
-      }>
+      const response = await callMiniMax(messages, apiKey)
+      const message = response.choices?.[0]?.message
 
-      if (textBlocks.length > 0) {
-        const summary = textBlocks.map((block) => block.text.trim()).filter(Boolean).join('\n')
+      const textContent = typeof message?.content === 'string' ? message.content.trim() : ''
 
-        if (summary) {
-          logSystem(issueId, 'Agent 生成总结', summary)
-          results.push({
-            id: randomUUID(),
-            issueId,
-            type: 'message',
-            name: 'agent_summary',
-            status: 'completed',
-            timestamp: nowIso(),
-            output: summary,
-          })
-        }
+      if (textContent) {
+        logSystem(issueId, 'Agent 生成总结', textContent)
+        results.push({
+          id: randomUUID(),
+          issueId,
+          type: 'message',
+          name: 'agent_summary',
+          status: 'completed',
+          timestamp: nowIso(),
+          output: textContent,
+        })
       }
 
-      const toolUseBlocks = response.content.filter((block) => block.type === 'tool_use') as Array<{
-        type: 'tool_use'
-        id: string
-        name: AgentToolName
-        input: Record<string, unknown>
-      }>
+      const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : []
 
-      if (toolUseBlocks.length === 0) {
+      if (toolCalls.length === 0) {
         const completedToolCount = results.filter(
           (result) => result.type === 'tool' && result.status === 'completed',
         ).length
-        logSystem(
-          issueId,
-          'Agent执行完成',
-          `共完成${completedToolCount}个动作。`,
-          'completed',
-        )
+        logSystem(issueId, 'Agent执行完成', `共完成${completedToolCount}个动作。`, 'completed')
         finalizeIssueStatus(issueId, results)
         return results
       }
 
-      messages.push({ role: 'assistant', content: response.content as Array<Record<string, unknown>> })
+      messages.push({
+        role: 'assistant',
+        content: message?.content ?? '',
+        tool_calls: toolCalls,
+      })
 
-      const toolResults = [] as Array<Record<string, unknown>>
-
-      for (const toolUse of toolUseBlocks) {
-        const execution = await executeTool(issueId, toolUse.name, toolUse.input)
+      for (const toolCall of toolCalls) {
+        const toolInput = parseToolArguments(toolCall.function.arguments)
+        const execution = await executeTool(issueId, toolCall.function.name, toolInput)
 
         results.push({
           id: randomUUID(),
           issueId,
           type: 'tool',
-          name: toolUse.name,
+          name: toolCall.function.name,
           status: execution.ok ? 'completed' : 'failed',
           timestamp: nowIso(),
-          input: toolUse.input,
+          input: toolInput,
           output: execution.ok ? execution.output : undefined,
           error: execution.ok ? undefined : execution.error,
         })
 
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
-          is_error: !execution.ok,
+        messages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
           content: JSON.stringify(execution.ok ? execution.output : { error: execution.error }, null, 2),
         })
       }
-
-      messages.push({ role: 'user', content: toolResults })
     }
 
-    const overflowMessage = 'Claude Agent 超过最大工具调用轮次，已停止继续执行。'
+    const overflowMessage = 'MiniMax Agent 超过最大工具调用轮次，已停止继续执行。'
     logError(issueId, 'agent', 'Agent 调用轮次超限', overflowMessage)
     updateIssueStatus(issueId, '执行失败')
     results.push(buildErrorResult(issueId, 'agent_overflow', overflowMessage))
@@ -344,20 +342,23 @@ function runEscalateIssue(issueId: string, input: Record<string, unknown>) {
   }
 }
 
-async function callClaude(messages: ClaudeMessage[], apiKey: string): Promise<ClaudeResponse> {
-  const client = new Anthropic({
+async function callMiniMax(messages: OpenAIStyleMessage[], apiKey: string): Promise<OpenAIStyleResponse> {
+  const client = new OpenAI({
     apiKey,
-    baseURL: (process.env.ANTHROPIC_BASE_URL?.trim() || 'https://api.anthropic.com').replace(/\/$/, ''),
+    baseURL: 'https://api.minimax.io/v1',
   })
 
-  return (await client.messages.create({
-    model: process.env.ANTHROPIC_MODEL?.trim() || CLAUDE_MODEL,
-    max_tokens: 1024,
+  return (await client.chat.completions.create({
+    model: process.env.MINIMAX_AGENT_MODEL?.trim() || MINIMAX_AGENT_MODEL,
     temperature: 0,
-    system: buildSystemPrompt(),
-    tools: TOOLS,
+    max_tokens: 1024,
+    tool_choice: 'auto',
+    tools: OPENAI_TOOLS as never,
     messages: messages as never,
-  } as never)) as unknown as ClaudeResponse
+    extra_body: {
+      reasoning_split: true,
+    },
+  } as never)) as unknown as OpenAIStyleResponse
 }
 
 function buildSystemPrompt() {
@@ -393,7 +394,7 @@ function logBeforeTool(issueId: string, toolName: AgentToolName, input: Record<s
     phase: 'before',
     toolName,
     action: `准备执行工具 ${toolName}`,
-    reason: 'Claude Agent 已选择该工具作为当前动作。',
+    reason: 'MiniMax Agent 已选择该工具作为当前动作。',
     result: '工具已开始执行。',
     status: 'started',
     requiresConfirmation: false,
@@ -521,12 +522,17 @@ function normalizeIssueId(issueId: string, value: unknown) {
   return issueId
 }
 
-function sanitize(value: string) {
-  return value.replace(/\s+/g, ' ').trim().slice(0, 300)
+function parseToolArguments(value: string) {
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {}
+  } catch {
+    throw new Error('工具参数不是合法 JSON。')
+  }
 }
 
 function resolveAgentProvider(): AgentProvider {
-  const value = (process.env.AGENT_PROVIDER?.trim() || 'anthropic').toLowerCase()
+  const value = (process.env.AGENT_PROVIDER?.trim() || 'minimax').toLowerCase()
 
   if (
     value === 'anthropic' ||
@@ -540,11 +546,11 @@ function resolveAgentProvider(): AgentProvider {
   throw new Error('AGENT_PROVIDER 仅支持 anthropic、openai、minimax 或 openai-compatible。')
 }
 
-function readAnthropicApiKey() {
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim()
+function readMiniMaxApiKey() {
+  const apiKey = process.env.MINIMAX_API_KEY?.trim()
 
   if (!apiKey) {
-    throw new Error('缺少 ANTHROPIC_API_KEY，无法运行 Claude Agent。')
+    throw new Error('缺少 MINIMAX_API_KEY，无法运行 MiniMax Agent。')
   }
 
   return apiKey

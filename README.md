@@ -30,7 +30,7 @@ npm install
 copy .env.example .env.local
 ```
 
-Then set `OPENAI_API_KEY` in `.env.local`.
+Then choose one provider config in `.env.local`.
 
 3. Start dev server
 
@@ -38,13 +38,48 @@ Then set `OPENAI_API_KEY` in `.env.local`.
 npm run dev
 ```
 
-4. Open `http://localhost:3000`
+4. Open the `Local:` URL shown in the terminal. If `3000` is occupied, Next.js will auto-switch to another port.
 
-## Required env vars
+## Provider configuration
 
-- `OPENAI_API_KEY`: required for the real AI parsing step
-- `OPENAI_MODEL`: optional, defaults to `gpt-4.1-mini`
-- `OPENAI_BASE_URL`: optional, for compatible proxies
+### OpenAI
+
+```env
+AI_PROVIDER=openai
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-4.1-mini
+```
+
+### MiniMax
+
+```env
+AI_PROVIDER=minimax
+MINIMAX_API_KEY=your_minimax_api_key_here
+MINIMAX_MODEL=MiniMax-M2.5
+```
+
+Default MiniMax endpoint used by the demo:
+
+```env
+MINIMAX_BASE_URL=https://api.minimaxi.com
+MINIMAX_API_PATH=/v1/text/chatcompletion_v2
+```
+
+### Other OpenAI-compatible providers
+
+```env
+AI_PROVIDER=openai-compatible
+AI_API_KEY=your_api_key_here
+AI_MODEL=your_model_name
+AI_BASE_URL=https://your-provider.example/v1
+AI_API_PATH=/chat/completions
+```
+
+Notes:
+
+- `openai-compatible` is for providers that expose an OpenAI-style chat completion API
+- the demo will first try `response_format: json_object`; if the provider does not support it, it will automatically retry without that field
+- MiniMax uses its own official endpoint and still returns the same parsed JSON structure to the frontend
 
 ## Demo flow
 

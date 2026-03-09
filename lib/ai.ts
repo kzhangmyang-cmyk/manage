@@ -9,7 +9,9 @@ const ANALYZE_PROMPT = `你是一个企业内部问题分析助手。
   "impact": "影响范围描述（一句话）",
   "recommended_owner": "推荐负责部门",
   "suggested_sla": "建议响应时限（如：30分钟/2小时/24小时）",
-  "reason": "判断依据（一句话）"
+  "reason": "判断依据（一句话）",
+  "auto_handle": true,
+  "recommended_path": "自动完成/建议确认/升级人工"
 }
 只返回JSON，不要其他内容。`
 
@@ -390,6 +392,7 @@ function normalizeAnalysisResult(value: unknown): AIAnalysisResult {
   }
 
   const record = value as Record<string, unknown>
+  const recommendedPath = normalizeRecommendedPath(readStringField(record, 'recommended_path'))
 
   return {
     category: normalizeCategory(readStringField(record, 'category')),
@@ -398,7 +401,59 @@ function normalizeAnalysisResult(value: unknown): AIAnalysisResult {
     recommended_owner: readStringField(record, 'recommended_owner'),
     suggested_sla: readStringField(record, 'suggested_sla'),
     reason: readStringField(record, 'reason'),
+    auto_handle: normalizeAutoHandle(record.auto_handle, recommendedPath),
+    recommended_path: recommendedPath,
   }
+}
+
+function normalizeRecommendedPath(value: string): AIAnalysisResult['recommended_path'] {
+  const normalized = value.replace(/\s+/g, '')
+
+  if (normalized.includes('自动完成')) {
+    return '自动完成'
+  }
+
+  if (normalized.includes('建议确认') || normalized.includes('建议处理') || normalized.includes('待确认')) {
+    return '建议确认'
+  }
+
+  if (normalized.includes('升级人工') || normalized.includes('人工处理') || normalized.includes('转人工')) {
+    return '升级人工'
+  }
+
+  throw new Error('模型返回的 recommended_path 不在支持范围内。')
+}
+
+function normalizeAutoHandle(value: unknown, recommendedPath: AIAnalysisResult['recommended_path']) {
+  if (typeof value === 'boolean') {
+    return value
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+
+    if (
+      normalized === 'true' ||
+      normalized === '1' ||
+      normalized === 'yes' ||
+      normalized === '是' ||
+      normalized === '可自动完成'
+    ) {
+      return true
+    }
+
+    if (
+      normalized === 'false' ||
+      normalized === '0' ||
+      normalized === 'no' ||
+      normalized === '否' ||
+      normalized === '不可自动完成'
+    ) {
+      return false
+    }
+  }
+
+  return recommendedPath === '自动完成'
 }
 
 function normalizeCategory(value: string) {

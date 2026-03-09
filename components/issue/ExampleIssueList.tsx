@@ -59,6 +59,13 @@ export function ExampleIssueList({
                 {issue.text}
               </span>
 
+              {(issue.pathHint || issue.actionHint) ? (
+                <div className="panel-chips" style={{ marginTop: '2px' }}>
+                  {issue.pathHint ? <span className="panel-chip">路径：{issue.pathHint}</span> : null}
+                  {issue.actionHint ? <span className="panel-chip">动作：{issue.actionHint}</span> : null}
+                </div>
+              ) : null}
+
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
                 <button
                   type="button"

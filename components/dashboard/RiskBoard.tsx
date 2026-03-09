@@ -7,16 +7,16 @@ type RiskBoardProps = {
 export function RiskBoard({ data }: RiskBoardProps) {
   const metrics = data
     ? [
-        { label: '今日高风险异常', value: String(data.highRiskCount), note: '优先级为高的问题数量' },
-        { label: '超时事项', value: String(data.overdueCount), note: '已升级或需要立即干预' },
-        { label: '重点关注事项', value: String(data.focusItemCount), note: '当前最值得管理者先盯住的条目' },
-        { label: '处理中事项', value: String(data.inProgressCount), note: '当前仍在推进中的风险与请求' },
+        { label: '已提前暴露的高风险', value: String(data.highRiskCount), note: '老板现在就该盯住的问题数量' },
+        { label: '已经升级 / 超时', value: String(data.overdueCount), note: '已进入管理干预窗口' },
+        { label: '还在等确认', value: String(data.pendingConfirmationCount), note: '系统已给建议，但还没被最终拍板' },
+        { label: 'AI 已先完成', value: String(data.autoCompletedCount), note: '低风险标准动作已经先做掉了' },
       ]
     : [
-        { label: '今日高风险异常', value: '--', note: '完成一次 AI 解析后生成' },
-        { label: '超时事项', value: '--', note: '完成一次 AI 解析后生成' },
-        { label: '重点关注事项', value: '--', note: '完成一次 AI 解析后生成' },
-        { label: '处理中事项', value: '--', note: '完成一次 AI 解析后生成' },
+        { label: '已提前暴露的高风险', value: '--', note: '完成一次 AI 解析后生成' },
+        { label: '已经升级 / 超时', value: '--', note: '完成一次 AI 解析后生成' },
+        { label: '还在等确认', value: '--', note: '完成一次 AI 解析后生成' },
+        { label: 'AI 已先完成', value: '--', note: '完成一次 AI 解析后生成' },
       ]
 
   return (

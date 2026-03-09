@@ -47,12 +47,13 @@ export function AgentActivityPanel({ status, activities }: AgentActivityPanelPro
       <span className="panel-kicker">Agent activity</span>
       <h3 className="panel-title">Agent Activity</h3>
       <p className="panel-description">
-        这一列未来必须绑定真实 AI 请求生命周期。当前先用本地预演结果验证信息结构，不使用纯定时器动画。
+        这一列已经绑定真实 AI 请求生命周期。当前会展示解析、三分流判断和下一阶段动作准备，而不是纯视觉动画。
       </p>
 
       <div className="panel-chips">
         <span className="panel-chip">status: {status}</span>
         <span className="panel-chip">lifecycle-ready</span>
+        <span className="panel-chip">triage aware</span>
       </div>
 
       {activities.length > 0 ? (

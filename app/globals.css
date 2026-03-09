@@ -400,6 +400,7 @@ textarea {
   border: 1px solid var(--color-border-soft);
   border-radius: var(--radius-lg);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(248, 244, 236, 0.9));
+  box-shadow: 0 8px 24px rgba(33, 28, 20, 0.04);
 }
 
 .placeholder-panel.is-primary {
@@ -624,6 +625,14 @@ textarea {
     grid-template-columns: 1fr 1fr;
   }
 
+  .panel-stack {
+    gap: 14px;
+  }
+
+  .panel-description {
+    max-width: none;
+  }
+
   .stage-indicator {
     width: 100%;
     text-align: left;
@@ -682,8 +691,27 @@ textarea {
     padding: 18px;
   }
 
+  .stage-shell {
+    margin-top: 18px;
+  }
+
+  .panel-stack,
+  .canvas-grid {
+    gap: 14px;
+  }
+
+  .footer-note {
+    margin-top: 14px;
+    padding: 14px 16px;
+  }
+
   .hero-title {
     font-size: 2rem;
+  }
+
+  .stage-title,
+  .panel-title {
+    line-height: 1.28;
   }
 
   .step-tabs {

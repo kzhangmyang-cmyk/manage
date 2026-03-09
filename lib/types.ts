@@ -4,7 +4,23 @@ export type DemoStep = 'input' | 'analysis' | 'timeline' | 'dashboard'
 
 export type AnalysisStatus = 'idle' | 'loading' | 'success' | 'error'
 
+export type RecommendedPath = '自动完成' | '建议确认' | '升级人工'
+
+export type AutomationActionKind =
+  | '自动回答'
+  | '自动信息查询'
+  | '自动通知'
+  | '自动状态更新'
+  | '建议处理'
+  | '升级人工'
+
 export type ActivityStatus = 'pending' | 'active' | 'completed' | 'failed'
+
+export type ExecutionLogStatus =
+  | 'completed'
+  | 'pending_confirmation'
+  | 'escalated'
+  | 'queued'
 
 export type IssueSource = 'employee' | 'store' | 'department'
 
@@ -33,6 +49,8 @@ export interface ExampleIssue {
   id: string
   title: string
   text: string
+  pathHint?: RecommendedPath
+  actionHint?: AutomationActionKind
 }
 
 export interface IndustryData {
@@ -78,6 +96,8 @@ export interface AIAnalysisResult {
   recommended_owner: string
   suggested_sla: string
   reason: string
+  auto_handle: boolean
+  recommended_path: RecommendedPath
 }
 
 export interface AgentActivityItem {
@@ -115,6 +135,8 @@ export interface FocusItem {
   owner: string
   riskNote: string
   status: string
+  pathLabel?: RecommendedPath
+  actionLabel?: AutomationActionKind
 }
 
 export interface DepartmentBacklogItem {
@@ -133,6 +155,8 @@ export interface RiskItem {
   ageLabel: string
   escalationStatus: EscalationStatus
   nextAction: string
+  pathLabel?: RecommendedPath
+  actionLabel?: AutomationActionKind
 }
 
 export interface DashboardData {
@@ -140,8 +164,22 @@ export interface DashboardData {
   overdueCount: number
   inProgressCount: number
   focusItemCount: number
+  autoCompletedCount: number
+  pendingConfirmationCount: number
   focusItems: FocusItem[]
   departmentBacklog: DepartmentBacklogItem[]
   riskList: RiskItem[]
+  executionLogs: ExecutionLogEntry[]
   managerSummary: string
+}
+
+export interface ExecutionLogEntry {
+  id: string
+  timestamp: string
+  action: string
+  reason: string
+  result: string
+  status: ExecutionLogStatus
+  requiresConfirmation: boolean
+  revocable: boolean
 }

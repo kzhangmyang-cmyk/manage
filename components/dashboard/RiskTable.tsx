@@ -30,6 +30,12 @@ export function RiskTable({ data }: RiskTableProps) {
                 <div style={metaStyle}>
                   {risk.category} · {risk.ageLabel}
                 </div>
+                {risk.pathLabel || risk.actionLabel ? (
+                  <div className="panel-chips" style={{ marginTop: '8px' }}>
+                    {risk.pathLabel ? <span className="panel-chip">路径：{risk.pathLabel}</span> : null}
+                    {risk.actionLabel ? <span className="panel-chip">动作：{risk.actionLabel}</span> : null}
+                  </div>
+                ) : null}
               </div>
               <div className="risk-table-cell" data-label="优先级" style={cellStyle}>
                 {risk.priority}

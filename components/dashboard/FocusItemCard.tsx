@@ -39,6 +39,8 @@ export function FocusItemCard({ data }: FocusItemCardProps) {
               <span className="panel-chip">{primary.priority}</span>
               <span className="panel-chip">{primary.owner}</span>
               <span className="panel-chip">{primary.status}</span>
+              {primary.pathLabel ? <span className="panel-chip">{primary.pathLabel}</span> : null}
+              {primary.actionLabel ? <span className="panel-chip">{primary.actionLabel}</span> : null}
             </div>
           </div>
 
@@ -58,6 +60,12 @@ export function FocusItemCard({ data }: FocusItemCardProps) {
                   <div style={{ marginTop: '6px', fontSize: '0.9rem', color: 'var(--color-text-soft)' }}>
                     {item.riskNote}
                   </div>
+                  {item.pathLabel || item.actionLabel ? (
+                    <div className="panel-chips" style={{ marginTop: '10px' }}>
+                      {item.pathLabel ? <span className="panel-chip">{item.pathLabel}</span> : null}
+                      {item.actionLabel ? <span className="panel-chip">{item.actionLabel}</span> : null}
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>

@@ -94,20 +94,45 @@ export function AIAnalysisCard({
       ) : null}
 
       {hasResult ? (
-        <div style={fieldGridStyle}>
-          <AnalysisField label="问题类型" value={result?.category ?? '-'} tone="accent" />
-          <AnalysisField
-            label="优先级"
-            value={result?.priority ?? '-'}
-            tone={result?.priority === '高' ? 'alert' : 'default'}
-          />
-          <AnalysisField label="影响范围" value={result?.impact ?? '-'} />
-          <AnalysisField label="推荐责任人" value={result?.recommended_owner ?? '-'} />
-          <AnalysisField label="建议响应时限" value={result?.suggested_sla ?? '-'} tone="accent" />
-        </div>
+        <>
+          <div style={fieldGridStyle}>
+            <AnalysisField label="问题类型" value={result?.category ?? '-'} tone="accent" />
+            <AnalysisField
+              label="处理路径"
+              value={result?.recommended_path ?? '-'}
+              tone={
+                result?.recommended_path === '升级人工'
+                  ? 'alert'
+                  : result?.recommended_path === '自动完成'
+                    ? 'accent'
+                    : 'default'
+              }
+            />
+            <AnalysisField
+              label="优先级"
+              value={result?.priority ?? '-'}
+              tone={result?.priority === '高' ? 'alert' : 'default'}
+            />
+            <AnalysisField
+              label="自动处理判断"
+              value={result?.auto_handle ? '可自动完成' : '需确认或人工处理'}
+              tone={result?.auto_handle ? 'accent' : 'default'}
+            />
+            <AnalysisField label="影响范围" value={result?.impact ?? '-'} />
+            <AnalysisField label="推荐责任人" value={result?.recommended_owner ?? '-'} />
+            <AnalysisField label="建议响应时限" value={result?.suggested_sla ?? '-'} tone="accent" />
+          </div>
+
+          <div className="panel-chips" style={{ marginTop: '18px' }}>
+            <span className="panel-chip">recommended path: {result?.recommended_path}</span>
+            <span className="panel-chip">
+              auto handle: {result?.auto_handle ? 'true' : 'false'}
+            </span>
+          </div>
+        </>
       ) : status !== 'loading' && status !== 'error' ? (
         <div style={{ ...summaryBoxStyle, marginTop: '18px' }}>
-          还没有解析结果。下一轮接入真实 API 后，这里会显示分类、优先级、影响范围、路由对象和 SLA。
+          还没有解析结果。这里会显示分类、优先级、影响范围、路由对象、SLA，以及自动处理判断和推荐路径。
         </div>
       ) : null}
     </article>

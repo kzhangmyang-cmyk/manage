@@ -80,6 +80,13 @@ export function ParsingReasonCard({ status, result, error }: ParsingReasonCardPr
           </div>
         </section>
 
+        <section style={itemStyle}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--color-text-muted)' }}>
+            处理路径说明
+          </div>
+          <div style={{ marginTop: '8px', lineHeight: 1.65 }}>{buildPathReasonCopy(result)}</div>
+        </section>
+
         <section
           style={{
             ...itemStyle,
@@ -97,4 +104,16 @@ export function ParsingReasonCard({ status, result, error }: ParsingReasonCardPr
       </div>
     </article>
   )
+}
+
+function buildPathReasonCopy(result: AIAnalysisResult) {
+  if (result.recommended_path === '自动完成') {
+    return `系统判断该问题属于低风险标准动作，可先由 AI 自动完成。当前 auto_handle 为 ${result.auto_handle ? 'true' : 'false'}。`
+  }
+
+  if (result.recommended_path === '建议确认') {
+    return `系统判断这件事已有明确建议，但仍需要负责人确认后再执行，避免 AI 在边界不清晰时直接动作。`
+  }
+
+  return `系统判断该问题影响较大或不确定性较高，因此推荐升级人工，而不是让 AI 直接处理。`
 }

@@ -3,8 +3,10 @@
 import { useMemo, useRef, useState } from 'react'
 import { AgentActivityPanel } from '../components/analysis/AgentActivityPanel'
 import { AIAnalysisCard } from '../components/analysis/AIAnalysisCard'
+import { HandleDecisionCard } from '../components/analysis/HandleDecisionCard'
 import { ParsingReasonCard } from '../components/analysis/ParsingReasonCard'
 import { DepartmentBacklogChart } from '../components/dashboard/DepartmentBacklogChart'
+import { ExecutionLogPanel } from '../components/dashboard/ExecutionLogPanel'
 import { FocusItemCard } from '../components/dashboard/FocusItemCard'
 import { ManagerSummaryCard } from '../components/dashboard/ManagerSummaryCard'
 import { RiskBoard } from '../components/dashboard/RiskBoard'
@@ -257,17 +259,16 @@ export default function HomePage() {
         analysisResult: result,
       })
       setTimelineData(nextTimelineData)
-      setDashboardData(
-        buildDashboardData({
-          industryId,
-          issueId: runId,
-          issueText: submittedText,
-          analysisResult: result,
-          timelineData: nextTimelineData,
-        }),
-      )
+      const nextDashboardData = buildDashboardData({
+        industryId,
+        issueId: runId,
+        issueText: submittedText,
+        analysisResult: result,
+        timelineData: nextTimelineData,
+      })
+      setDashboardData(nextDashboardData)
 
-      await playSuccessLifecycle(runId, result)
+      await playSuccessLifecycle(runId, result, nextDashboardData.executionLogs.length)
     } catch (error) {
       if (latestRunIdRef.current !== runId) {
         return
@@ -316,7 +317,7 @@ export default function HomePage() {
     setAgentActivities((current) => updater(current))
   }
 
-  async function playSuccessLifecycle(runId: string, result: AIAnalysisResult) {
+  async function playSuccessLifecycle(runId: string, result: AIAnalysisResult, logCount: number) {
     updateActivitiesForRun(runId, (current) => {
       let next = completeActivity(current, 'awaiting', '模型已返回结构化 JSON。')
       next = activateActivity(next, 'category', '正在写入问题类型。')
@@ -360,7 +361,22 @@ export default function HomePage() {
         'routing',
         `建议路由到 ${result.recommended_owner}，建议 SLA：${result.suggested_sla}`,
       )
-      next = activateActivity(next, 'ready', '正在整理最终展示内容。')
+      next = activateActivity(next, 'triage', '正在判断是否可自动完成与推荐处理路径。')
+      return next
+    })
+    await wait(140)
+
+    if (latestRunIdRef.current !== runId) {
+      return
+    }
+
+    updateActivitiesForRun(runId, (current) => {
+      let next = completeActivity(
+        current,
+        'triage',
+        `已完成三分流判断：${result.recommended_path}；自动处理：${result.auto_handle ? '是' : '否'}`,
+      )
+      next = activateActivity(next, 'logging', '正在写入执行日志。')
       return next
     })
     await wait(120)
@@ -369,8 +385,19 @@ export default function HomePage() {
       return
     }
 
+    updateActivitiesForRun(runId, (current) => {
+      let next = completeActivity(current, 'logging', `已写入 ${logCount} 条可审计执行日志。`)
+      next = activateActivity(next, 'ready', '正在整理最终展示内容。')
+      return next
+    })
+    await wait(100)
+
+    if (latestRunIdRef.current !== runId) {
+      return
+    }
+
     updateActivitiesForRun(runId, (current) =>
-      completeActivity(current, 'ready', '解析完成，已可进入流转视图。'),
+      completeActivity(current, 'ready', '解析完成，已生成处理路径判断并可进入下一阶段。'),
     )
     setAnalysisStatus('success')
   }
@@ -450,6 +477,11 @@ export default function HomePage() {
                 result={analysisResult}
                 error={analysisError}
               />
+              <HandleDecisionCard
+                status={analysisStatus}
+                result={analysisResult}
+                issueText={activeIssueText}
+              />
               <ParsingReasonCard
                 status={analysisStatus}
                 result={analysisResult}
@@ -463,13 +495,13 @@ export default function HomePage() {
                 <span className="panel-kicker">Next connection</span>
                 <h3 className="panel-title">真实请求已接入</h3>
                 <p className="panel-description">
-                  现在这里已经改成真实 `/api/analyze` 请求驱动。若要本地跑通，请在 `.env.local` 中提供
-                  `OPENAI_API_KEY`，也可用 `OPENAI_MODEL` 覆盖默认模型。
+                  现在这里已经改成真实 `/api/analyze` 请求驱动。当前支持 OpenAI、MiniMax 和兼容
+                  OpenAI 的提供商，并已开始承接自动处理判断字段。
                 </p>
                 <div className="panel-chips">
                   <span className="panel-chip">POST /api/analyze</span>
                   <span className="panel-chip">fixed prompt</span>
-                  <span className="panel-chip">OPENAI_API_KEY</span>
+                  <span className="panel-chip">multi-provider</span>
                 </div>
               </article>
             </div>
@@ -477,7 +509,7 @@ export default function HomePage() {
         ) : currentStep === 'timeline' ? (
           <div className="canvas-grid canvas-grid--timeline stage-view">
             <div className="panel-stack">
-              <TimelinePanel data={timelineData} />
+              <TimelinePanel data={timelineData} result={analysisResult} issueText={activeIssueText} />
             </div>
 
             <div className="panel-stack">
@@ -490,6 +522,7 @@ export default function HomePage() {
                 industryId={activeIndustry.id}
                 data={timelineData}
                 result={analysisResult}
+                issueText={activeIssueText}
               />
             </div>
           </div>
@@ -500,6 +533,7 @@ export default function HomePage() {
             <DepartmentBacklogChart data={dashboardData} />
             <ManagerSummaryCard data={dashboardData} />
             <FocusItemCard data={dashboardData} />
+            <ExecutionLogPanel data={dashboardData} />
           </div>
         ) : (
           renderStageLayout(stageContent.panels, currentStep)
@@ -594,9 +628,9 @@ function getStageContent(step: DemoStep): {
       return {
         title: '问题输入页',
         summary:
-          '这一屏已经接上行业数据、示例问题、附件占位和反监控叙事。输入仍保持简单，只承接自然语言问题，不做复杂表单。',
+          '先让一线把问题讲清楚，后面哪些事可以让 AI 先做、哪些事需要确认、哪些事必须升级，会由系统自动判断。',
         footer:
-          '点击示例问题会回填左侧输入框；点击“继续到 AI 解析”会发起真实 API 请求，并在下一屏展示结构化结果。',
+          '点击示例问题会回填左侧输入框；你也可以直接演示一条低风险查询，快速看到“AI 已先完成什么”。',
         panels: [
           {
             kicker: 'Primary zone',
@@ -625,9 +659,9 @@ function getStageContent(step: DemoStep): {
       return {
         title: 'AI 解析页',
         summary:
-          '这一屏现在由真实 `/api/analyze` 请求驱动：左侧展示结构化结果，右侧展示绑定请求生命周期的 Agent Activity。',
+          '这一屏不只是识别问题，而是在判断：这件事 AI 能不能先做掉、要不要等确认、还是应该立刻升级。',
         footer:
-          '当前没有使用纯定时器动画。Agent Activity 的开始、返回和字段完成都绑定到真实请求与真实返回内容。',
+          '当前没有使用纯定时器动画。Agent Activity 绑定真实请求过程，管理者能看到系统是怎么一步步做出处理判断的。',
         panels: [
           {
             kicker: 'Primary zone',
@@ -661,9 +695,9 @@ function getStageContent(step: DemoStep): {
       return {
         title: '流转时间线页',
         summary:
-          '这一屏已经由真实 AI 解析结果驱动：左侧把流转节点串成时间线，右侧说明是否已升级、当前该谁接、下一步该谁盯。',
+          '这一屏不是为了讲流程，而是为了讲结果：这件事有没有被推进，AI 有没有先做事，现在该谁接，什么时候必须升级。',
         footer:
-          '没有 manage 时，这类问题通常停在群消息、私聊或口头同步里；现在你能直接看到它是否已被接住、什么时候该升级。',
+          '没有 manage 时，这类问题通常停在群消息、私聊或口头同步里；现在你能直接看到它是否已被接住、AI 是否已先处理、什么时候该升级。',
         panels: [
           {
             kicker: 'Primary zone',
@@ -692,9 +726,9 @@ function getStageContent(step: DemoStep): {
       return {
         title: '管理者看板',
         summary:
-          '这一屏已经把真实解析结果和流转状态汇总成管理视图：上层看风险数量，下层看责任团队积压、重点事项和简洁摘要。',
+          '这一屏回答的不是“系统有多少功能”，而是“今天 AI 已先完成了什么、还有哪些事在等确认、哪些风险必须马上盯”。',
         footer:
-          '第一版没有接复杂图表库，部门积压先用轻量条形卡片表现；重点不是可视化炫技，而是让管理者有可信感和控制感。',
+          '第一版没有接复杂图表库，部门积压先用轻量条形卡片表现；执行日志会直接告诉管理者：AI 做了什么、为什么这样做、结果是什么。',
         panels: [
           {
             kicker: 'Metrics',
@@ -791,6 +825,18 @@ function createInitialActivities(): AgentActivityItem[] {
       detail: '将从真实返回结果中读取 recommended_owner 和 suggested_sla。',
     },
     {
+      id: 'triage',
+      label: '等待自动处理判断与推荐路径',
+      status: 'pending',
+      detail: '将从真实返回结果中读取 auto_handle 和 recommended_path。',
+    },
+    {
+      id: 'logging',
+      label: '等待写入执行日志',
+      status: 'pending',
+      detail: '将把执行动作、原因、结果和状态写入审计日志。',
+    },
+    {
       id: 'ready',
       label: '等待解析完成',
       status: 'pending',
@@ -860,18 +906,21 @@ function normalizeClientAnalysis(payload: unknown): AIAnalysisResult {
   }
 
   const record = payload as Record<string, unknown>
+  const recommendedPath = normalizeClientRecommendedPath(readClientStringField(record, 'recommended_path'))
 
   return {
-    category: readClientField(record, 'category'),
-    priority: readClientField(record, 'priority'),
-    impact: readClientField(record, 'impact'),
-    recommended_owner: readClientField(record, 'recommended_owner'),
-    suggested_sla: readClientField(record, 'suggested_sla'),
-    reason: readClientField(record, 'reason'),
+    category: readClientStringField(record, 'category'),
+    priority: readClientStringField(record, 'priority'),
+    impact: readClientStringField(record, 'impact'),
+    recommended_owner: readClientStringField(record, 'recommended_owner'),
+    suggested_sla: readClientStringField(record, 'suggested_sla'),
+    reason: readClientStringField(record, 'reason'),
+    auto_handle: normalizeClientAutoHandle(record.auto_handle, recommendedPath),
+    recommended_path: recommendedPath,
   }
 }
 
-function readClientField(record: Record<string, unknown>, key: keyof AIAnalysisResult) {
+function readClientStringField(record: Record<string, unknown>, key: keyof AIAnalysisResult) {
   const value = record[key]
 
   if (typeof value !== 'string' || !value.trim()) {
@@ -879,6 +928,59 @@ function readClientField(record: Record<string, unknown>, key: keyof AIAnalysisR
   }
 
   return value.trim()
+}
+
+function normalizeClientRecommendedPath(value: string): AIAnalysisResult['recommended_path'] {
+  const normalized = value.replace(/\s+/g, '')
+
+  if (normalized.includes('自动完成')) {
+    return '自动完成'
+  }
+
+  if (normalized.includes('建议确认') || normalized.includes('建议处理') || normalized.includes('待确认')) {
+    return '建议确认'
+  }
+
+  if (normalized.includes('升级人工') || normalized.includes('人工处理') || normalized.includes('转人工')) {
+    return '升级人工'
+  }
+
+  throw new Error('AI 解析结果中的 recommended_path 不在支持范围内。')
+}
+
+function normalizeClientAutoHandle(
+  value: unknown,
+  recommendedPath: AIAnalysisResult['recommended_path'],
+) {
+  if (typeof value === 'boolean') {
+    return value
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+
+    if (
+      normalized === 'true' ||
+      normalized === '1' ||
+      normalized === 'yes' ||
+      normalized === '是' ||
+      normalized === '可自动完成'
+    ) {
+      return true
+    }
+
+    if (
+      normalized === 'false' ||
+      normalized === '0' ||
+      normalized === 'no' ||
+      normalized === '否' ||
+      normalized === '不可自动完成'
+    ) {
+      return false
+    }
+  }
+
+  return recommendedPath === '自动完成'
 }
 
 function readApiError(payload: unknown): string {

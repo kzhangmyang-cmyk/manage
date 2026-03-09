@@ -312,7 +312,7 @@ async function runQueryData(input: Record<string, unknown>, originalQuestion: st
   const apiKey = readMiniMaxApiKey()
   const client = new OpenAI({
     apiKey,
-    baseURL: 'https://api.minimax.io/v1',
+    baseURL: 'https://api.minimax.chat/v1',
   })
 
   const fallback = await client.chat.completions.create({

@@ -268,7 +268,7 @@ function buildDisplayItems(
     if (log.action === 'Agent执行完成') {
       items.push({
         id: log.id,
-        label: `${formattedTime}  ✓  ${log.action}，${log.result}`,
+        label: `${formattedTime}  ✓  ${log.action}，${cleanContent(log.result)}`,
         status: 'completed',
       })
       return
@@ -342,7 +342,7 @@ function summarizeCompletedTool(log: DbExecutionLogEntry) {
 
 function summarizeLogDetail(log: DbExecutionLogEntry) {
   if (log.phase === 'error' || log.status === 'failed') {
-    return log.result
+    return cleanContent(log.result)
   }
 
   const details = parseDetails(log.details)
@@ -356,10 +356,14 @@ function summarizeLogDetail(log: DbExecutionLogEntry) {
   }
 
   if (typeof log.result === 'string' && log.result.trim()) {
-    return log.result
+    return cleanContent(log.result)
   }
 
   return undefined
+}
+
+function cleanContent(text: string) {
+  return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
 }
 
 function isExecutionLog(value: unknown): value is DbExecutionLogEntry {

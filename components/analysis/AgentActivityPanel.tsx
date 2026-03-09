@@ -1,9 +1,13 @@
+'use client'
+
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { AgentActivityItem, AnalysisStatus } from '../../lib/types'
+import type { AIAnalysisResult, AnalysisStatus, DbExecutionLogEntry } from '../../lib/types'
 
 type AgentActivityPanelProps = {
   status: AnalysisStatus
-  activities: AgentActivityItem[]
+  issueId: string | null
+  recommendedPath?: AIAnalysisResult['recommended_path'] | null
 }
 
 const rowStyle: CSSProperties = {
@@ -13,15 +17,18 @@ const rowStyle: CSSProperties = {
   alignItems: 'start',
 }
 
-function getDotStyle(status: AgentActivityItem['status']): CSSProperties {
+function getDotStyle(status: 'completed' | 'running' | 'failed', tone?: 'warning' | 'flow'): CSSProperties {
   if (status === 'completed') {
     return {
-      background: 'var(--color-accent)',
-      boxShadow: '0 0 0 5px rgba(32, 106, 94, 0.12)',
+      background: tone === 'warning' ? 'var(--color-alert)' : 'var(--color-accent)',
+      boxShadow:
+        tone === 'warning'
+          ? '0 0 0 5px rgba(178, 95, 69, 0.12)'
+          : '0 0 0 5px rgba(32, 106, 94, 0.12)',
     }
   }
 
-  if (status === 'active') {
+  if (status === 'running') {
     return {
       background: 'var(--color-alert)',
       boxShadow: '0 0 0 5px rgba(178, 95, 69, 0.12)',
@@ -41,24 +48,116 @@ function getDotStyle(status: AgentActivityItem['status']): CSSProperties {
   }
 }
 
-export function AgentActivityPanel({ status, activities }: AgentActivityPanelProps) {
+export function AgentActivityPanel({ status, issueId, recommendedPath }: AgentActivityPanelProps) {
+  const [logs, setLogs] = useState<DbExecutionLogEntry[]>([])
+  const [pollError, setPollError] = useState<string | null>(null)
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => {
+    setLogs([])
+    setPollError(null)
+
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+      intervalRef.current = null
+    }
+
+    if (!issueId) {
+      return
+    }
+
+    let cancelled = false
+
+    async function fetchLogs() {
+      try {
+        const response = await fetch(`/api/issues/${issueId}/logs`, {
+          cache: 'no-store',
+        })
+
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as { error?: string } | null
+          throw new Error(payload?.error ?? '读取执行日志失败。')
+        }
+
+        const payload = (await response.json()) as {
+          issueId: string
+          logs: DbExecutionLogEntry[]
+        }
+
+        if (cancelled) {
+          return
+        }
+
+        const nextLogs = Array.isArray(payload.logs) ? payload.logs : []
+        setLogs(nextLogs)
+
+        if (shouldStopPolling(nextLogs, recommendedPath)) {
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current)
+            intervalRef.current = null
+          }
+        }
+      } catch (error) {
+        if (cancelled) {
+          return
+        }
+
+        setPollError(error instanceof Error ? error.message : '读取执行日志失败。')
+
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current)
+          intervalRef.current = null
+        }
+      }
+    }
+
+    void fetchLogs()
+    intervalRef.current = setInterval(() => {
+      void fetchLogs()
+    }, 2000)
+
+    return () => {
+      cancelled = true
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+    }
+  }, [issueId, recommendedPath])
+
+  const displayItems = useMemo(() => buildDisplayItems(logs, recommendedPath), [logs, recommendedPath])
+
   return (
     <article className="placeholder-panel">
       <span className="panel-kicker">Agent activity</span>
       <h3 className="panel-title">Agent Activity</h3>
       <p className="panel-description">
-        这一列已经绑定真实 AI 请求生命周期。当前会展示解析、三分流判断和下一阶段动作准备，而不是纯视觉动画。
+        这里展示的是 Agent 的真实执行过程。提交问题后，系统会轮询后台执行日志，而不是播放假动画。
       </p>
 
       <div className="panel-chips">
         <span className="panel-chip">status: {status}</span>
-        <span className="panel-chip">lifecycle-ready</span>
-        <span className="panel-chip">triage aware</span>
+        <span className="panel-chip">issue: {issueId ?? 'pending'}</span>
+        <span className="panel-chip">live logs</span>
       </div>
 
-      {activities.length > 0 ? (
+      {pollError ? (
+        <div
+          style={{
+            marginTop: '20px',
+            padding: '16px',
+            borderRadius: '18px',
+            border: '1px solid rgba(178, 95, 69, 0.24)',
+            background: 'rgba(252, 241, 236, 0.84)',
+            color: '#7b3f2f',
+            lineHeight: 1.65,
+          }}
+        >
+          {pollError}
+        </div>
+      ) : displayItems.length > 0 ? (
         <div style={{ display: 'grid', gap: '16px', marginTop: '20px' }}>
-          {activities.map((activity) => (
+          {displayItems.map((activity) => (
             <div key={activity.id} style={rowStyle}>
               <span
                 aria-hidden="true"
@@ -67,11 +166,11 @@ export function AgentActivityPanel({ status, activities }: AgentActivityPanelPro
                   height: '10px',
                   borderRadius: '999px',
                   marginTop: '6px',
-                  ...getDotStyle(activity.status),
+                  ...getDotStyle(activity.status, activity.tone),
                 }}
               />
               <div>
-                <div style={{ fontWeight: 600, lineHeight: 1.5, color: 'var(--color-text)' }}>
+                <div style={{ fontWeight: 600, lineHeight: 1.5, color: 'var(--color-text)', whiteSpace: 'pre-wrap' }}>
                   {activity.label}
                 </div>
                 {activity.detail ? (
@@ -95,9 +194,253 @@ export function AgentActivityPanel({ status, activities }: AgentActivityPanelPro
             lineHeight: 1.65,
           }}
         >
-          还没有请求生命周期。先从输入页提交一个问题，本地预演会生成一组可替换为真实请求状态的 Activity。
+          {status === 'loading'
+            ? '正在等待 AI 解析结果写入执行日志。'
+            : '提交一个问题后，这里会自动轮询后台 Agent 的真实执行记录。'}
         </div>
       )}
     </article>
   )
+}
+
+type DisplayItem = {
+  id: string
+  label: string
+  detail?: string
+  status: 'completed' | 'running' | 'failed'
+  tone?: 'warning' | 'flow'
+}
+
+function buildDisplayItems(
+  logs: DbExecutionLogEntry[],
+  recommendedPath?: AIAnalysisResult['recommended_path'] | null,
+): DisplayItem[] {
+  const items: DisplayItem[] = []
+
+  logs.forEach((log) => {
+    const formattedTime = formatTime(log.timestamp)
+    const detailText = summarizeLogDetail(log)
+
+    if (log.action === '加入后台 Agent 执行队列' || log.action === 'Agent 开始处理') {
+      return
+    }
+
+    if (log.action === '接收问题并完成AI解析') {
+      items.push({
+        id: log.id,
+        label: `${formattedTime}  ✓  接收问题并完成AI解析`,
+        detail: detailText,
+        status: 'completed',
+      })
+      return
+    }
+
+    if (log.phase === 'before' && log.toolName && log.toolName !== 'agent') {
+      items.push({
+        id: log.id,
+        label: `${formattedTime}  →  调用工具：${log.toolName}（执行中...）`,
+        detail: detailText,
+        status: 'running',
+        tone: 'flow',
+      })
+      return
+    }
+
+    if (log.phase === 'after' && log.toolName && log.toolName !== 'agent') {
+      items.push({
+        id: log.id,
+        label: `${formattedTime}  ✓  ${summarizeCompletedTool(log)}`,
+        detail: detailText,
+        status: 'completed',
+      })
+      return
+    }
+
+    if (log.action === '该问题超出自动处理范围') {
+      items.push({
+        id: log.id,
+        label: `${formattedTime}  ⚠  该问题超出自动处理范围`,
+        detail: detailText,
+        status: 'completed',
+        tone: 'warning',
+      })
+      return
+    }
+
+    if (log.action === '已升级给管理层，等待人工介入') {
+      items.push({
+        id: log.id,
+        label: `${formattedTime}  →  已升级给管理层，等待人工介入`,
+        detail: detailText,
+        status: 'completed',
+        tone: 'flow',
+      })
+      return
+    }
+
+    if (log.action === '已生成处理建议，等待负责人确认') {
+      items.push({
+        id: log.id,
+        label: `${formattedTime}  →  已生成处理建议，等待负责人确认`,
+        detail: detailText,
+        status: 'completed',
+        tone: 'flow',
+      })
+      return
+    }
+
+    if (log.action === 'Agent执行完成') {
+      items.push({
+        id: log.id,
+        label: `${formattedTime}  ✓  ${log.action}，${log.result}`,
+        status: 'completed',
+      })
+      return
+    }
+
+    if (log.status === 'failed') {
+      items.push({
+        id: log.id,
+        label: `${formattedTime}  ✕  ${log.action}`,
+        detail: detailText,
+        status: 'failed',
+      })
+      return
+    }
+
+    if (log.toolName === 'agent' && recommendedPath === '升级人工' && log.phase === 'system') {
+      return
+    }
+
+    items.push({
+      id: log.id,
+      label: `${formattedTime}  ✓  ${log.action}`,
+      detail: detailText,
+      status: 'completed',
+    })
+  })
+
+  return items
+}
+
+function summarizeCompletedTool(log: DbExecutionLogEntry) {
+  const details = parseDetails(log.details)
+
+  if (log.toolName === 'create_ticket') {
+    const ticketId = readDetail(details, 'ticket_id')
+    const owner = readDetail(details, 'owner')
+
+    if (ticketId && owner) {
+      return `已创建工单 ${ticketId}，分配给${owner}`
+    }
+  }
+
+  if (log.toolName === 'send_notification') {
+    const recipient = readDetail(details, 'recipient')
+    const message = readDetail(details, 'message')
+
+    if (recipient) {
+      return message ? `已通知${recipient}，${message}` : `已通知${recipient}`
+    }
+  }
+
+  if (log.toolName === 'query_data') {
+    const queryType = readDetail(details, 'query_type')
+    const count = readDetail(details, 'count')
+
+    if (queryType) {
+      return `已完成${queryType}查询${count ? `，返回${count}条结果` : ''}`
+    }
+  }
+
+  if (log.toolName === 'escalate_issue') {
+    const escalateTo = readDetail(details, 'escalate_to')
+
+    if (escalateTo) {
+      return `已升级给${escalateTo}，等待人工介入`
+    }
+  }
+
+  return log.reason
+}
+
+function summarizeLogDetail(log: DbExecutionLogEntry) {
+  if (log.phase === 'error' || log.status === 'failed') {
+    return log.result
+  }
+
+  const details = parseDetails(log.details)
+
+  if (log.toolName === 'query_data') {
+    const items = Array.isArray(details.items) ? details.items : []
+
+    if (items.length > 0) {
+      return `已返回 ${items.length} 条查询结果。`
+    }
+  }
+
+  if (typeof log.result === 'string' && log.result.trim()) {
+    return log.result
+  }
+
+  return undefined
+}
+
+function shouldStopPolling(
+  logs: DbExecutionLogEntry[],
+  recommendedPath?: AIAnalysisResult['recommended_path'] | null,
+) {
+  if (logs.length === 0) {
+    return false
+  }
+
+  const terminalStatuses = new Set(['completed', 'failed'])
+  const allTerminal = logs.every((log) => terminalStatuses.has(log.status))
+
+  if (!allTerminal) {
+    return false
+  }
+
+  if (recommendedPath === '自动完成') {
+    return logs.some((log) => log.action === 'Agent执行完成')
+  }
+
+  return true
+}
+
+function parseDetails(value?: string) {
+  if (!value) {
+    return {} as Record<string, unknown>
+  }
+
+  try {
+    return JSON.parse(value) as Record<string, unknown>
+  } catch {
+    return {} as Record<string, unknown>
+  }
+}
+
+function readDetail(details: Record<string, unknown>, key: string) {
+  const value = details[key]
+
+  if (typeof value === 'string' || typeof value === 'number') {
+    return String(value)
+  }
+
+  return ''
+}
+
+function formatTime(value: string) {
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return date.toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
 }

@@ -1,3 +1,4 @@
+import Anthropic from '@anthropic-ai/sdk'
 import type { AIAnalysisResult } from './types'
 
 const ANALYZE_PROMPT = `你是一个企业内部问题分析助手。
@@ -15,7 +16,7 @@ const ANALYZE_PROMPT = `你是一个企业内部问题分析助手。
 }
 只返回JSON，不要其他内容。`
 
-type AIProvider = 'openai' | 'minimax' | 'openai-compatible'
+type AIProvider = 'openai' | 'minimax' | 'openai-compatible' | 'anthropic'
 
 type ProviderConfig = {
   provider: AIProvider
@@ -76,6 +77,21 @@ function resolveProviderConfig(): ProviderConfig {
     }
   }
 
+  if (provider === 'anthropic') {
+    const apiKey = readRequiredEnv(['ANTHROPIC_API_KEY'])
+
+    return {
+      provider,
+      apiKey,
+      model: readOptionalEnv(['ANTHROPIC_MODEL', 'AI_MODEL']) ?? 'claude-sonnet-4-20250514',
+      baseUrl: stripTrailingSlash(
+        readOptionalEnv(['ANTHROPIC_BASE_URL']) ?? 'https://api.anthropic.com',
+      ),
+      apiPath: '/v1/messages',
+      useJsonResponseFormat: false,
+    }
+  }
+
   const apiKey = readRequiredEnv(['OPENAI_API_KEY', 'AI_API_KEY'])
 
   return {
@@ -95,7 +111,31 @@ async function requestCompletion(text: string, config: ProviderConfig): Promise<
     return requestMiniMax(text, config)
   }
 
+  if (config.provider === 'anthropic') {
+    return requestAnthropic(text, config)
+  }
+
   return requestOpenAIStyle(text, config)
+}
+
+async function requestAnthropic(text: string, config: ProviderConfig): Promise<unknown> {
+  const client = new Anthropic({
+    apiKey: config.apiKey,
+    baseURL: config.baseUrl,
+  })
+
+  return client.messages.create({
+    model: config.model,
+    max_tokens: 1024,
+    temperature: 0,
+    system: ANALYZE_PROMPT,
+    messages: [
+      {
+        role: 'user',
+        content: text,
+      },
+    ],
+  } as never)
 }
 
 async function requestOpenAIStyle(text: string, config: ProviderConfig): Promise<unknown> {
@@ -199,6 +239,10 @@ function inferProvider(): AIProvider {
     return 'minimax'
   }
 
+  if (process.env.ANTHROPIC_API_KEY) {
+    return 'anthropic'
+  }
+
   if (process.env.AI_API_KEY || process.env.AI_BASE_URL) {
     return 'openai-compatible'
   }
@@ -209,13 +253,16 @@ function inferProvider(): AIProvider {
 function normalizeProvider(value: string): AIProvider {
   const normalized = value.trim().toLowerCase()
 
-  if (normalized === 'openai' || normalized === 'minimax' || normalized === 'openai-compatible') {
+  if (
+    normalized === 'openai' ||
+    normalized === 'minimax' ||
+    normalized === 'openai-compatible' ||
+    normalized === 'anthropic'
+  ) {
     return normalized
   }
 
-  throw new Error(
-    'AI_PROVIDER 仅支持 openai、minimax 或 openai-compatible，请检查 .env.local 配置。',
-  )
+  throw new Error('AI_PROVIDER 仅支持 openai、minimax、openai-compatible 或 anthropic。')
 }
 
 function readRequiredEnv(keys: string[]): string {
@@ -307,6 +354,12 @@ function extractMessageContent(payload: unknown): string {
 
   if (choiceContent) {
     return choiceContent
+  }
+
+  const contentBlocks = stringifyContent(record.content)
+
+  if (contentBlocks) {
+    return contentBlocks
   }
 
   if (typeof record.content === 'string' && record.content.trim()) {

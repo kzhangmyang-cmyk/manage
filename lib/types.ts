@@ -21,6 +21,18 @@ export type ExecutionLogStatus =
   | 'pending_confirmation'
   | 'escalated'
   | 'queued'
+  | 'started'
+  | 'failed'
+
+export type AgentToolName =
+  | 'send_notification'
+  | 'query_data'
+  | 'create_ticket'
+  | 'escalate_issue'
+
+export type QueryDataType = 'inventory' | 'schedule' | 'project' | 'request'
+
+export type AgentRunStatus = 'queued' | 'running' | 'completed' | 'failed'
 
 export type IssueSource = 'employee' | 'store' | 'department'
 
@@ -182,4 +194,94 @@ export interface ExecutionLogEntry {
   status: ExecutionLogStatus
   requiresConfirmation: boolean
   revocable: boolean
+}
+
+export interface DbExecutionLogEntry extends ExecutionLogEntry {
+  issueId: string
+  phase: 'before' | 'after' | 'error' | 'system'
+  toolName?: AgentToolName | 'agent'
+  details?: string
+}
+
+export interface NotificationRecord {
+  id: string
+  recipient: string
+  message: string
+  urgency: '高' | '中' | '低'
+  issueId: string
+  sentAt: string
+}
+
+export interface TicketRecord {
+  id: string
+  title: string
+  owner: string
+  priority: string
+  sla: string
+  issueId: string
+  status: string
+  createdAt: string
+}
+
+export interface MockDataRecord {
+  id: string
+  dataType: QueryDataType
+  keyword: string
+  result: Record<string, unknown>
+}
+
+export interface AgentExecutionResult {
+  id: string
+  issueId: string
+  type: 'message' | 'tool'
+  name: string
+  status: AgentRunStatus
+  timestamp: string
+  input?: unknown
+  output?: unknown
+  error?: string
+}
+
+export interface RecentExecutionLogItem {
+  id: string
+  issueId: string
+  timestamp: string
+  issueSummary: string
+  category: string
+  priority: string
+  recommendedPath: RecommendedPath | null
+  issueStatus: string
+  action: string
+  result: string
+  status: ExecutionLogStatus
+  requiresConfirmation: boolean
+  revocable: boolean
+}
+
+export interface DashboardCategoryStat {
+  category: string
+  count: number
+}
+
+export interface DashboardRiskItem {
+  id: string
+  issueSummary: string
+  category: string
+  priority: string
+  owner: string
+  status: string
+  recommendedPath: RecommendedPath | null
+  createdAt: string
+}
+
+export interface DashboardApiPayload {
+  today_total: number
+  auto_completed: number
+  pending_confirm: number
+  escalated: number
+  overdue: number
+  avg_resolution_minutes: number
+  top_categories: DashboardCategoryStat[]
+  risk_items: DashboardRiskItem[]
+  agent_summary: string
 }

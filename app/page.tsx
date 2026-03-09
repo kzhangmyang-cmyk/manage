@@ -102,6 +102,7 @@ export default function HomePage() {
     attachments: defaultAttachmentItems,
   })
   const [activeIssueText, setActiveIssueText] = useState('')
+  const [activeIssueId, setActiveIssueId] = useState<string | null>(null)
   const [activeIndustryId, setActiveIndustryId] = useState<IndustryId | null>(null)
   const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>('idle')
   const [analysisResult, setAnalysisResult] = useState<AIAnalysisResult | null>(null)
@@ -204,6 +205,7 @@ export default function HomePage() {
     latestRunIdRef.current = runId
 
     setActiveIssueText(submittedText)
+    setActiveIssueId(null)
     setActiveIndustryId(industryId)
     setAnalysisStatus('loading')
     setAnalysisResult(null)
@@ -233,7 +235,11 @@ export default function HomePage() {
       })
 
       const payload = (await response.json().catch(() => null)) as
-        | (AIAnalysisResult & { error?: string })
+        | (AIAnalysisResult & {
+            issueId?: string
+            agentExecutionResults?: Array<Record<string, unknown>>
+            error?: string
+          })
         | { error?: string }
         | null
 
@@ -246,11 +252,16 @@ export default function HomePage() {
       }
 
       const result = normalizeClientAnalysis(payload)
+      const nextIssueId =
+        payload && typeof payload === 'object' && typeof (payload as { issueId?: unknown }).issueId === 'string'
+          ? (payload as { issueId: string }).issueId
+          : null
 
       if (latestRunIdRef.current !== runId) {
         return
       }
 
+      setActiveIssueId(nextIssueId)
       setAnalysisResult(result)
       const nextTimelineData = buildTimelineData({
         industryId,
@@ -490,7 +501,11 @@ export default function HomePage() {
             </div>
 
             <div className="panel-stack">
-              <AgentActivityPanel status={analysisStatus} activities={agentActivities} />
+              <AgentActivityPanel
+                status={analysisStatus}
+                issueId={activeIssueId}
+                recommendedPath={analysisResult?.recommended_path ?? null}
+              />
               <article className="placeholder-panel">
                 <span className="panel-kicker">Next connection</span>
                 <h3 className="panel-title">真实请求已接入</h3>
